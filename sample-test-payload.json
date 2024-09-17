@@ -1,0 +1,7 @@
+{
+"id": "394KJEIREKJRE",
+"url": "https://www.amazon.com",
+"testCases": [
+"You are testing the amazon.com web application. Your test case is to add to cart the most expensive pen. The test case finishes when the pen is visible within the cart. You should monitor the number of items in the cart."
+]
+}
