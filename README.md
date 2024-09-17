@@ -1,4 +1,4 @@
-# Bedrock Test Automation using Selenium
+# GenAI Test Automation using Selenium
 
 Execute functional test cases in any web application using natural language. Move away from statically coding your test cases using tools like selenium or puppeteer. Let a generative ai agent test the scenario and provide you with the test results.
 
