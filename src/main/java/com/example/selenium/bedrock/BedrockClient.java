@@ -29,11 +29,12 @@ public class BedrockClient implements BedrockService {
     @SuppressWarnings("unused")
     private static final String CLAUDE_SONNET = "anthropic.claude-3-sonnet-20240229-v1:0";
     private static final String CLAUDE_SONNET_3_5 = "anthropic.claude-3-5-sonnet-20240620-v1:0";
+    private static final String CLAUDE_SONNET_3_5_V2 = "us.anthropic.claude-3-5-sonnet-20241022-v2:0";
 
     @SuppressWarnings("unused")
     private static final String CLAUDE_HAIKU = "anthropic.claude-3-haiku-20240307-v1:0";
 
-    private static final String DEFAULT_MODEL = CLAUDE_SONNET_3_5;
+    private static final String DEFAULT_MODEL = CLAUDE_SONNET_3_5;;
 
     private BedrockRuntimeAsyncClient client = null;
 
@@ -97,7 +98,7 @@ public class BedrockClient implements BedrockService {
         String modelId = config.getModelName();
 
         Double temperature = 0.25d;
-        if( DEFAULT_MODEL.equals( BedrockClient.CLAUDE_SONNET_3_5 )){
+        if( DEFAULT_MODEL.equals( BedrockClient.CLAUDE_SONNET_3_5 ) || DEFAULT_MODEL.equals( BedrockClient.CLAUDE_SONNET_3_5_V2 )){
             temperature = 0.15d;
         }
 
