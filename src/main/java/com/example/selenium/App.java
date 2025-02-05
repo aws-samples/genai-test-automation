@@ -59,7 +59,7 @@ public class App {
             .andThen(new Navigate(CommandParams.builder()
                 .url("https://www.amazon.com/")
                 .testCase("""
-                        You are testing the amazon.com web application. Your test case is to add to cart the most expensive pen. The test case finishes when the pen is visible within the cart. You should monitor the number of items in the cart.
+                        You are testing the amazon.com web application. Your test case is to add to cart the most expensive soccer ball. The test case finishes when the soccer ball is visible within the cart. You should monitor the number of items in the cart.
                 """)
                 .build()))
             .tearDown();

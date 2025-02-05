@@ -57,7 +57,7 @@ public abstract class AbstractNavigation implements Command {
     protected Boolean success   =   Boolean.FALSE;
 
     public AbstractNavigation(CommandParams params) {
-        
+        logger.info("Executing test case: "+params.getTestCase());
         try{
         	service = new BedrockClient();
         }catch(Exception e){
@@ -129,7 +129,9 @@ public abstract class AbstractNavigation implements Command {
                 //logger.info("Source:\n "+html);
                 logger.info("Prompt Length:"+prompt.length());
                 
-                String response = service.invokeWithImage(prompt, screenshot());
+                //String response = service.invokeWithImage(prompt, screenshot());
+                screenshot();
+                String response = service.invoke(prompt);
 
                 logger.info(response);
 
