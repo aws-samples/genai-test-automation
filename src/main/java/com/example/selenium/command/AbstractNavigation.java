@@ -106,7 +106,7 @@ public abstract class AbstractNavigation implements Command {
 
         // Start testing
         for (int i = 0; i < interactions; i++) {
-
+            logger.info("Available interactions: "+(interactions-i));
             try{
                 Integer step = i+1;  
 
@@ -129,11 +129,9 @@ public abstract class AbstractNavigation implements Command {
                 //logger.info("Source:\n "+html);
                 logger.info("Prompt Length:"+prompt.length());
                 
-                //String response = service.invokeWithImage(prompt, screenshot());
-                screenshot();
-                String response = service.invoke(prompt);
-
-                logger.info(response);
+                // screenshot();
+                String response = service.invokeWithImage(prompt, screenshot());
+                // String response = service.invoke(prompt);
 
                 JSONObject text = getResponseJSON(response);
 
@@ -151,12 +149,12 @@ public abstract class AbstractNavigation implements Command {
                 //add step information inside the JSONObject text
                 text.put("step", step);
                 logger.info(String.format("Step #%s. Explanation: %s", step, explanation));
-                
+                logger.info(String.format("Step actions: %s", actions));
                 List<HtmlElement> click = inputData(elements, actions);
 
                 if( click.isEmpty() ){
                     logger.info("No click action found");
-                    pastActions.add(text.toString());
+                    pastActions.add(String.format("{\"step\":%s, \"actions\": %s}", step, actions));
                     elements.clear();
                     new Actions(browser).sendKeys(Keys.TAB, Keys.ENTER).perform();
                     continue;
@@ -167,13 +165,11 @@ public abstract class AbstractNavigation implements Command {
                 });
                 //new Actions(browser).moveToElement(click.getElement()).click().perform();
                 
-                pastActions.add(text.toString());
+                pastActions.add(String.format("{\"step\":%s, \"actions\": %s}", step, actions));
                 Thread.sleep(delay);
 
             }catch(Exception e){
-                // logger.error(e.getMessage());
-                logger.error("Clicked on something that didn't work (possible element that is not visible). Will continue with the next action....");
-                logger.error(e.getMessage());
+                logger.error("Clicked on something that didn't work (possibly an element that is not visible or not clickable). Will continue with the next action....");
             }
             elements.clear();
         }
@@ -438,18 +434,29 @@ public abstract class AbstractNavigation implements Command {
     
     JSONObject getResponseJSON(String response) throws Exception {
 
-        // Parse the response to get the selected element ID and explanation
-        JSONObject jsonResponse = new JSONObject(response);
-        //get content object that is an array of json objects
-        JSONArray content = jsonResponse.getJSONArray("content");
-        //get the first element of the array
-        JSONObject firstElement = content.getJSONObject(0);
+        try{
+            // Parse the response to get the selected element ID and explanation
+            JSONObject jsonResponse = new JSONObject(response);
+            try{
+                logger.info(String.format("Input Token Count: %s ", jsonResponse.getJSONObject("metrics").getString("inputTokenCount")));
+                logger.info(String.format("Output Token Count: %s", jsonResponse.getJSONObject("metrics").getString("outputTokenCount")));
+            }catch(Exception e){
+                logger.info("Unable to get token count");
+            }
+            //get content object that is an array of json objects
+            JSONArray content = jsonResponse.getJSONArray("content");
+            //get the first element of the array
+            JSONObject firstElement = content.getJSONObject(0);
 
-        String rawResponse = firstElement.getString("text");
+            String rawResponse = firstElement.getString("text");
 
-        rawResponse = rawResponse.replaceAll("\n", "");
-        //extract JSON Object from the response
-        return new JSONObject( rawResponse.substring(rawResponse.indexOf("{"), rawResponse.lastIndexOf("}")+1));
+            rawResponse = rawResponse.replaceAll("\n", "");
+            //extract JSON Object from the response
+            return new JSONObject( rawResponse.substring(rawResponse.indexOf("{"), rawResponse.lastIndexOf("}")+1));
+        }catch(Exception e){
+            logger.info("Unable to parse response: "+response);
+            throw e;
+        }
     }
     
     protected File screenshot() throws IOException{
@@ -508,7 +515,7 @@ public abstract class AbstractNavigation implements Command {
             <available-interactions>%s</available-interactions>
             <interact>%s</interact>.
             
-            Answer in JSON format:                        
+            Answer in JSON format:     
                 """;   
     }// Your answer is in JSON format. Your answer contain at most only one click action. You execute at least 10 steps before failing. Your actions use elements from the input
 

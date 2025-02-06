@@ -22,6 +22,7 @@ public class NovaModelHandler implements ModelHandler {
             .put("inferenceConfig", new JSONObject()
                 .put("max_new_tokens", 1000)
                 .put("temperature", temperature))
+                // .put("top_p", 0.1d))
             .append("messages", new JSONObject()
                     .put("role", "user")
                     .append("content", new JSONObject()

@@ -10,6 +10,13 @@ The solution can execute different types of test cases for authentication, creat
 
 <img src="./imgs/test-automation-arch.png">
 
+## Supported Models
+
+- Anthropic Claude Sonnet 3.5
+- Anthropic Claude Sonnet 3.5 V2
+- Amazon Nova Pro
+- Extensible to support new Models via Bedrock Custom models or Bedrock Marketplace
+
 ## Requirements
 To run this project, the following are needed:
 
@@ -48,26 +55,26 @@ To deploy using an existing VPC, update file `cdk.json` and add the VPC id as a 
 
 ## Test results
 
-- The project provides a sample test case that is to navigate the amazon store and add the most expensive pen into the shopping cart.
-- The prompt used is: *You are testing the amazon.com web application. Your test case is to add to cart the most expensive pen. The test case finishes when the pen is visible within the cart. You should monitor the number of items in the cart.*
+- The project provides a sample test case that is to navigate the amazon store and add the most expensive soccer ball size 3 into the shopping cart.
+- The prompt used is: *You are testing the amazon.com web application. Your test case is to add to cart the most expensive soccer ball size 3. The test case finishes when the soccer ball is visible within the cart. You should monitor the number of items in the cart.*
 - For each interaction with the web browser, the LLM is expected to provide its reasoning behind the actions it is executing.
 - The sequence of screenshots below is from an execution of the sample test case. The reasoning for each step is taken from log files.
 ### Output
 <br>
 
-| <img src="./imgs/screenshot-1719941853481.png" width=100%>  | <img src="./imgs/screenshot-1719941925330.png" width=100%> |
+| <img src="./imgs/screenshot-1738813827414.png" width=100%>  | <img src="./imgs/screenshot-1738818282705.png" width=100%> |
 |:--------:|--------:|
-| Step #1. Explanation: To start the search for the most expensive pen, we need to enter 'pen' in the search box and submit the search. | Step #2. Explanation: To find the most expensive pen, we need to sort the search results by price from high to low. |
+| Step #1. Explanation: To search for soccer balls size 3, first enter the search term in the search box | Step #2. Explanation: To find the most expensive soccer ball size 3, I'll sort the results by price high to low |
 <br>
 
-| <img src="./imgs/screenshot-1719942011958.png"> | <img src="./imgs/screenshot-1719942084550.png"> |
+| <img src="./imgs/screenshot-1738818389608.png"> | <img src="./imgs/screenshot-1738818431026.png"> |
 |:--------:|--------:|
-| Step #3. Explanation: The search results are now displayed, sorted by price from high to low. We need to add the first (most expensive) pen to the cart. | Step #4. Explanation: The most expensive pen has been added to the cart. Now we need to verify that it is visible in the cart and check the number of items. |
+| Step #3. Explanation: To find the most expensive soccer ball size 3, we should sort the results by price high to low | Step #4. Explanation: The search results are sorted by price from high to low by default, showing the FORZA Icon Soccer Ball as the most expensive at $959.99. I will click the 'Add to cart' button for this item. |
 <br>
 
-| <img src="./imgs/screenshot-1719942134212.png" width=60%>  |
+| <img src="./imgs/screenshot-1738818431026.png" width=60%>  |
 |:--------:|
-| Test finished. Status: success. Explanation: The most expensive pen has been successfully added to the cart and is now visible. The cart shows 1 item, which matches our expectation. | 
+| Test finished. Status: success. Explanation: The test case is completed successfully. The cart now shows '1 item' as indicated by the HTML element '<span>1 item</span>' and the most expensive soccer ball size 3 (FORZA Icon Soccer Ball at $959.99) has been added to cart. This is confirmed by the cart item details shown in the HTML under the 'ewc-content' section which displays the same product and price. | 
 
 
 
