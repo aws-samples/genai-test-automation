@@ -89,7 +89,10 @@ public abstract class AbstractNavigation implements Command {
         if( browser == null ){
             // Open the web browser and navigate to the app's URL
             ChromeOptions options = new ChromeOptions();
-            options.setHeadless(Boolean.TRUE);
+            if( !params.headless() ){
+                options.setHeadless(params.headless());
+            }
+            options.setHeadless(Boolean.FALSE);
             options.addArguments("--remote-allow-origins=*", "--window-size=2560,1440", "--no-sandbox", "--disable-dev-shm-usage");
             try{
                 browser = new ChromeDriver(options);
@@ -103,7 +106,6 @@ public abstract class AbstractNavigation implements Command {
         String html = null;
         String htmlCompressed   =   null;
         final List<HtmlElement> elements = new ArrayList<>();
-
         // Start testing
         for (int i = 0; i < interactions; i++) {
             logger.info("Available interactions: "+(interactions-i));
@@ -115,10 +117,11 @@ public abstract class AbstractNavigation implements Command {
                 wait.pollingEvery(Duration.ofMillis(250));
                 wait.until(browser-> ((JavascriptExecutor)browser).executeScript("return document.readyState").toString().equals("complete"));
         
+   
                 elements.addAll(getHtmlElements(browser, params.setIds()));
-                if( params.setIds() )
+                if( params.setIds() ){
                     setIds(browser, elements);
-
+                }
                 html = cleanHtml(browser.getPageSource());
                 htmlCompressed = compressor.compress(html);
                 // logger.info("HTML: "+html);
@@ -129,10 +132,17 @@ public abstract class AbstractNavigation implements Command {
                 //logger.info("Source:\n "+html);
                 logger.info("Prompt Length:"+prompt.length());
                 
-                // screenshot();
-                String response = service.invokeWithImage(prompt, screenshot());
-                // String response = service.invoke(prompt);
-
+                String response = null;
+                try{
+                    screenshot();
+                    // response = service.invokeWithImage(prompt, screenshot());
+                    response = service.invoke(prompt);
+                }catch(Exception e){
+                    logger.error("Error invoking the model. Msg: "+e.getMessage());
+                    elements.clear();
+                    continue;
+                
+                }
                 JSONObject text = getResponseJSON(response);
 
                 if(text.has("status")){
@@ -209,9 +219,9 @@ public abstract class AbstractNavigation implements Command {
             }else if( "click".equals(action.getString("action")) ){
                 
                 Optional<HtmlElement> webElement = elements.stream().filter(e-> action.getString("id").equals(e.getId())).findFirst();
-                if(webElement.isPresent()){
+                //if(webElement.isPresent()){
                     click.add(webElement.get());
-                }
+                //}
             }
         }
         return click;
@@ -517,7 +527,7 @@ public abstract class AbstractNavigation implements Command {
             
             Answer in JSON format:     
                 """;   
-    }// Your answer is in JSON format. Your answer contain at most only one click action. You execute at least 10 steps before failing. Your actions use elements from the input
+    }
 
     @Override
     public Command andThen(Command c) throws Exception {

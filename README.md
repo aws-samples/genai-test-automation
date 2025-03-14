@@ -37,6 +37,10 @@ To run this project, the following are needed:
 ```
 java -jar target/genai-selenium-1.0-SNAPSHOT.jar 
 ```
+ - Alternatively use the following command to add chromedriver to your java environment:
+```
+java -Dwebdriver.chrome.driver=/path/to/my/chromdriver -jar target/genai-selenium-1.0-SNAPSHOT.jar 
+```
 - Run remotelly using API Gateway and SQS:
 
 ```

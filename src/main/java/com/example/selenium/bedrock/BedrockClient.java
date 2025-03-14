@@ -25,6 +25,7 @@ public class BedrockClient implements BedrockService {
     public static final String CLAUDE_SONNET = "anthropic.claude-3-sonnet-20240229-v1:0";
     public static final String CLAUDE_SONNET_3_5 = "anthropic.claude-3-5-sonnet-20240620-v1:0";
     public static final String CLAUDE_SONNET_3_5_V2 = "us.anthropic.claude-3-5-sonnet-20241022-v2:0";
+    public static final String CLAUDE_SONNET_3_7 = "us.anthropic.claude-3-7-sonnet-20250219-v1:0";
     public static final String NOVA_PRO = "amazon.nova-pro-v1:0";
 
     @SuppressWarnings("unused")

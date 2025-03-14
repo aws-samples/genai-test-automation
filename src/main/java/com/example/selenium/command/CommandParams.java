@@ -9,6 +9,7 @@ public class CommandParams {
     private String testCase = "";
     private Boolean setIds = Boolean.FALSE;
     private Boolean useS3 = Boolean.FALSE;
+    private Boolean headless = Boolean.TRUE;
 
     private CommandParams() {
     }
@@ -34,6 +35,9 @@ public class CommandParams {
     }
     public Boolean useS3() {
         return useS3;
+    }
+    public Boolean headless() {
+        return headless;
     }
 
     //builder pattern to create CommandParams using fluent language
@@ -75,6 +79,10 @@ public class CommandParams {
         }
         public Builder useS3(Boolean useS3) {
             params.useS3 = useS3;
+            return this;
+        }
+        public Builder headless(Boolean headless) {
+            params.headless = headless;
             return this;
         }
 
