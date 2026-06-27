@@ -6,6 +6,7 @@ import java.time.Duration;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import com.example.selenium.bedrock.model.ModelHandler;
 import com.example.selenium.bedrock.model.ModelHandlerFactory;
@@ -26,12 +27,16 @@ public class BedrockClient implements BedrockService {
     public static final String CLAUDE_SONNET_3_5 = "anthropic.claude-3-5-sonnet-20240620-v1:0";
     public static final String CLAUDE_SONNET_3_5_V2 = "us.anthropic.claude-3-5-sonnet-20241022-v2:0";
     public static final String CLAUDE_SONNET_3_7 = "us.anthropic.claude-3-7-sonnet-20250219-v1:0";
+    public static final String CLAUDE_SONNET_4_6 = "us.anthropic.claude-sonnet-4-6";
     public static final String NOVA_PRO = "amazon.nova-pro-v1:0";
 
     @SuppressWarnings("unused")
     private static final String CLAUDE_HAIKU = "anthropic.claude-3-haiku-20240307-v1:0";
 
-    public static final String DEFAULT_MODEL = CLAUDE_SONNET_3_5_V2;
+    public static final String DEFAULT_MODEL = CLAUDE_SONNET_4_6;
+
+    /** Beta flag that unlocks the 1M token context window on supported Claude models. */
+    private static final String CONTEXT_1M_BETA = "context-1m-2025-08-07";
     
     private BedrockRuntimeAsyncClient client;
     private BedrockClientConfig config;
@@ -84,6 +89,7 @@ public class BedrockClient implements BedrockService {
     private JSONObject invokeModelWithResponseStream(String prompt) {
 
         JSONObject payload = modelHandler.createPayload(prompt, config.getMaxTokens(), config.getTemperature());
+        enableLongContext(payload);
 
         var request = InvokeModelWithResponseStreamRequest.builder()
                 .contentType("application/json")
@@ -101,6 +107,7 @@ public class BedrockClient implements BedrockService {
     private JSONObject invokeModelWithResponseStream(String prompt, File imageLocation) {
 
         JSONObject requestBody = modelHandler.createPayload(prompt, imageLocation, config.getMaxTokens(), config.getTemperature());
+        enableLongContext(requestBody);
         
         var request = InvokeModelWithResponseStreamRequest.builder()
                 .contentType("application/json")
@@ -122,13 +129,27 @@ public class BedrockClient implements BedrockService {
         return response.toString();
     }
 
+    /**
+     * Adds the Anthropic 1M token context window beta flag to the request body
+     * for models that support it. The flag is a no-op for models that don't.
+     */
+    private void enableLongContext(JSONObject payload) {
+        if (supports1MContext(config.getModelId())) {
+            payload.put("anthropic_beta", new JSONArray().put(CONTEXT_1M_BETA));
+        }
+    }
+
+    private static boolean supports1MContext(String modelId) {
+        return CLAUDE_SONNET_4_6.equals(modelId);
+    }
+
     public static class BedrockClientConfig {
         private final int maxTokens;
         private final String modelId;
         private final Double temperature;
 
         private BedrockClientConfig() {
-            this(300000, BedrockClient.DEFAULT_MODEL, 0.15d);
+            this(64000, BedrockClient.DEFAULT_MODEL, 0.15d);
         }
 
         private BedrockClientConfig(int maxTokens, String modelId, Double temperature) {
@@ -150,7 +171,7 @@ public class BedrockClient implements BedrockService {
         }
 
         private static class BedrockClientConfigBuilder {
-            private int maxTokens = 300000;
+            private int maxTokens = 64000;
             private String modelId = BedrockClient.DEFAULT_MODEL;
             private Double temperature = 0.15d;
 

@@ -13,6 +13,8 @@ public class ModelHandlerFactory {
                 return new AnthropicModelHandler();
             case BedrockClient.CLAUDE_SONNET_3_7:
                 return new AnthropicModelHandler();
+            case BedrockClient.CLAUDE_SONNET_4_6:
+                return new AnthropicModelHandler();
             case BedrockClient.NOVA_PRO:
                 return new NovaModelHandler();
             default:
