@@ -160,71 +160,187 @@ public abstract class AbstractNavigation implements Command {
                 text.put("step", step);
                 logger.info(String.format("Step #%s. Explanation: %s", step, explanation));
                 logger.info(String.format("Step actions: %s", actions));
-                List<HtmlElement> click = inputData(elements, actions);
+                // Execute every action (inputs and clicks) and capture each outcome.
+                List<ActionResult> results = performActions(elements, actions);
 
-                if( click.isEmpty() ){
-                    logger.info("No click action found");
-                    pastActions.add(String.format("{\"step\":%s, \"actions\": %s}", step, actions));
-                    elements.clear();
+                // Record the step together with any failure observations, so the
+                // model learns from failed inputs/clicks instead of repeating them.
+                pastActions.add(buildStepRecord(step, actions, results));
+
+                // If the step had no click action, keep the original TAB+ENTER
+                // heuristic to submit after filling inputs.
+                if(!hasClickAction(actions)){
                     new Actions(browser).sendKeys(Keys.TAB, Keys.ENTER).perform();
-                    continue;
                 }
-                click.stream().forEach( c->{
-                    logger.info("Clicking on "+c.getId());
-                    c.getElement().click();
-                });
-                //new Actions(browser).moveToElement(click.getElement()).click().perform();
-                
-                pastActions.add(String.format("{\"step\":%s, \"actions\": %s}", step, actions));
                 Thread.sleep(delay);
 
             }catch(Exception e){
-                logger.error("Clicked on something that didn't work (possibly an element that is not visible or not clickable). Will continue with the next action....");
+                logger.error("Step failed and will continue with the next action. Cause: "+e.getClass().getSimpleName()+" - "+e.getMessage());
             }
             elements.clear();
         }
         return this;
     }
 
-    private List<HtmlElement> inputData(List<HtmlElement> elements, JSONArray actions ){
+    /**
+     * Attempts to click an element robustly. A plain Selenium click fails with
+     * ElementClickInterceptedException when a popover/modal overlay covers the
+     * target (common on Amazon after "Add to cart"). In that case we fall back
+     * to a JavaScript click, which dispatches the event directly to the element.
+     *
+     * @return true if the click (or the JS fallback) succeeded, false otherwise.
+     */
+    private boolean clickElement(HtmlElement c){
+        WebElement el = c.getElement();
+        try{
+            // Bring the element into view first; off-screen elements are not interactable.
+            ((JavascriptExecutor)browser).executeScript("arguments[0].scrollIntoView({block:'center'});", el);
+            el.click();
+            return true;
+        }catch(Exception e){
+            logger.warn("Native click failed on "+c.getId()+" ("+e.getClass().getSimpleName()+"). Trying JS click fallback.");
+            try{
+                ((JavascriptExecutor)browser).executeScript("arguments[0].click();", el);
+                return true;
+            }catch(Exception ex){
+                logger.error("Click failed on "+c.getId()+": "+ex.getClass().getSimpleName()+" - "+ex.getMessage());
+                return false;
+            }
+        }
+    }
 
-        List<HtmlElement> click = new ArrayList<>();
+    /**
+     * Selects an option in a dropdown robustly. The model supplies the
+     * human-readable label it sees (e.g. "Size 3"), but on many sites the
+     * option's value attribute is something else entirely (e.g. an Amazon ASIN
+     * like "B0BQW38TSM"). So we try, in order: exact visible text, value
+     * attribute, then a case-insensitive contains match on the visible text.
+     */
+    private void selectOption(Select select, String value){
+        String target = value == null ? "" : value.trim();
+
+        // Single pass over the actual options rather than catching exceptions to
+        // probe each strategy. Matching an option is an ordinary lookup, not an
+        // exceptional condition, so we don't drive the branching with try/catch.
+        for(WebElement opt : select.getOptions()){
+            String text = opt.getText() == null ? "" : opt.getText().trim();
+            String optValue = opt.getDomAttribute("value");
+            if(text.equalsIgnoreCase(target) || target.equalsIgnoreCase(optValue)){
+                select.selectByVisibleText(opt.getText());
+                return;
+            }
+        }
+        // Looser fallback: the label the model saw may be a substring of the option text.
+        for(WebElement opt : select.getOptions()){
+            String text = opt.getText() == null ? "" : opt.getText().trim();
+            if(!text.isEmpty() && text.toLowerCase().contains(target.toLowerCase())){
+                select.selectByVisibleText(opt.getText());
+                return;
+            }
+        }
+        // Genuinely exceptional: nothing matched. Let it propagate so the loop
+        // records the failure and the model adapts.
+        throw new org.openqa.selenium.NoSuchElementException(
+            "No <option> matched '"+value+"' by visible text or value attribute.");
+    }
+
+    /**
+     * Executes every action in a step and returns the per-action outcomes.
+     * Inputs are performed first (preserving the original fill-then-submit
+     * order), then clicks. Each action yields an {@link ActionResult} so the
+     * caller can feed failures back to the model.
+     */
+    private List<ActionResult> performActions(List<HtmlElement> elements, JSONArray actions){
+
+        List<ActionResult> results = new ArrayList<>();
+        List<JSONObject> clicks = new ArrayList<>();
 
         for(int ii=0; ii<actions.length(); ii++){
             JSONObject action = actions.getJSONObject(ii);
-            if( "input".equals(action.getString("action")) ){
-
-                String value = action.getString("value");
-                Optional<HtmlElement> element = elements.stream().filter(elem-> elem.getId().equals(action.getString("id"))).findFirst();
-                if(element.isPresent()){
-
-                    if(("select").equals(element.get().getElement().getTagName().toLowerCase())){
-
-                        Select select = new Select( element.get().getElement()) ;
-                        select.selectByValue(value);
-                        Optional<WebElement> option = select.getOptions().stream().filter(o-> o.isSelected()).findFirst();
-                        if(option.isPresent()){
-                            option.get().sendKeys(Keys.ENTER);
-                        }
-                        // new Actions(browser).sendKeys(Keys.ENTER).perform();
-                        try{
-                            screenshot();}catch(Exception e){e.printStackTrace();}
-                    }else{
-
-                        ((JavascriptExecutor)browser).executeScript("arguments[0].focus();", element.get().getElement());
-                        element.get().getElement().sendKeys(Keys.chord(Keys.CONTROL, "a"), value);
-                        logger.info("Inputted value "+value+" on "+element.get().getId());      
-                    }                  
-                }
-            }else if( "click".equals(action.getString("action")) ){
-                
-                Optional<HtmlElement> webElement = elements.stream().filter(e-> action.getString("id").equals(e.getId())).findFirst();
-                //if(webElement.isPresent()){
-                    click.add(webElement.get());
-                //}
+            String type = action.getString("action");
+            if("input".equals(type)){
+                results.add(performInput(elements, action));
+            }else if("click".equals(type)){
+                clicks.add(action);
             }
         }
-        return click;
+
+        for(JSONObject action : clicks){
+            results.add(performClick(elements, action));
+        }
+        return results;
+    }
+
+    private ActionResult performInput(List<HtmlElement> elements, JSONObject action){
+
+        String id = action.getString("id");
+        String value = action.optString("value");
+        Optional<HtmlElement> element = elements.stream().filter(e-> e.getId().equals(id)).findFirst();
+        if(element.isEmpty()){
+            return ActionResult.failure(action, "No element with id '"+id+"' is available. Pick an id from the interact list.");
+        }
+
+        WebElement el = element.get().getElement();
+        try{
+            if("select".equals(el.getTagName().toLowerCase())){
+                Select select = new Select(el);
+                selectOption(select, value);
+                select.getOptions().stream().filter(WebElement::isSelected).findFirst()
+                      .ifPresent(o-> o.sendKeys(Keys.ENTER));
+                try{ screenshot(); }catch(Exception se){ logger.warn("Screenshot after select failed: "+se.getMessage()); }
+            }else{
+                ((JavascriptExecutor)browser).executeScript("arguments[0].focus();", el);
+                el.sendKeys(Keys.chord(Keys.CONTROL, "a"), value);
+                logger.info("Inputted value "+value+" on "+id);
+            }
+            return ActionResult.success(action);
+        }catch(Exception e){
+            logger.error("Input failed on "+id+": "+e.getClass().getSimpleName()+" - "+e.getMessage());
+            return ActionResult.failure(action, e.getClass().getSimpleName()+": "+e.getMessage());
+        }
+    }
+
+    private ActionResult performClick(List<HtmlElement> elements, JSONObject action){
+
+        String id = action.getString("id");
+        Optional<HtmlElement> element = elements.stream().filter(e-> id.equals(e.getId())).findFirst();
+        if(element.isEmpty()){
+            return ActionResult.failure(action, "No element with id '"+id+"' is available. Pick an id from the interact list.");
+        }
+
+        logger.info("Clicking on "+id);
+        if(clickElement(element.get())){
+            return ActionResult.success(action);
+        }
+        return ActionResult.failure(action, "Element '"+id+"' was not clickable (it may be covered by a popover/modal or off-screen). Choose a different element id.");
+    }
+
+    /**
+     * Builds the action-history entry for a step. On full success it records
+     * just the step and its actions; when any action failed it appends the
+     * failure observations so the model can adjust its next move.
+     */
+    private String buildStepRecord(int step, JSONArray actions, List<ActionResult> results){
+
+        List<String> failures = results.stream()
+            .filter(r-> !r.isSuccess())
+            .map(ActionResult::getObservation)
+            .toList();
+
+        if(failures.isEmpty()){
+            return String.format("{\"step\":%s, \"actions\": %s}", step, actions);
+        }
+        String observation = String.join(" | ", failures).replace("\"", "'");
+        return String.format("{\"step\":%s, \"actions\": %s, \"result\":\"FAILED: %s\"}", step, actions, observation);
+    }
+
+    private boolean hasClickAction(JSONArray actions){
+        for(int ii=0; ii<actions.length(); ii++){
+            if("click".equals(actions.getJSONObject(ii).getString("action"))){
+                return true;
+            }
+        }
+        return false;
     }
 
     protected static String cleanHtml(String htmlString) {
