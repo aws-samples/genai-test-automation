@@ -39,7 +39,7 @@ java -jar target/genai-selenium-1.0-SNAPSHOT.jar
 ```
  - Alternatively use the following command to add chromedriver to your java environment:
 ```
-java -Dwebdriver.chrome.driver=/path/to/my/chromdriver -jar target/genai-selenium-1.0-SNAPSHOT.jar 
+java -Dwebdriver.chrome.driver=/path/to/my/chromedriver -jar target/genai-selenium-1.0-SNAPSHOT.jar 
 ```
 - Run remotelly using API Gateway and SQS:
 

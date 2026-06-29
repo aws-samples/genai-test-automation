@@ -19,8 +19,10 @@ import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
 import org.jsoup.select.Elements;
 import org.openqa.selenium.By;
+import org.openqa.selenium.ElementClickInterceptedException;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -118,7 +120,16 @@ public abstract class AbstractNavigation implements Command {
                 wait.until(browser-> ((JavascriptExecutor)browser).executeScript("return document.readyState").toString().equals("complete"));
         
    
-                elements.addAll(getHtmlElements(browser, params.setIds()));
+                // Collect interactable elements, retrying once if the DOM mutates
+                // mid-collection (Amazon lazily reflows search results, which
+                // makes element references go stale while we are reading them).
+                try{
+                    elements.addAll(getHtmlElements(browser, params.setIds()));
+                }catch(StaleElementReferenceException se){
+                    logger.warn("Element collection hit a stale element; clearing and retrying once.");
+                    elements.clear();
+                    elements.addAll(getHtmlElements(browser, params.setIds()));
+                }
                 if( params.setIds() ){
                     setIds(browser, elements);
                 }
@@ -138,6 +149,10 @@ public abstract class AbstractNavigation implements Command {
                     // response = service.invokeWithImage(prompt, screenshot());
                     response = service.invoke(prompt);
                 }catch(Exception e){
+                    if(isFatalError(e)){
+                        logger.error("Aborting test run - unrecoverable error invoking the model: "+e.getClass().getSimpleName()+" - "+e.getMessage());
+                        break;
+                    }
                     logger.error("Error invoking the model. Msg: "+e.getMessage());
                     elements.clear();
                     continue;
@@ -175,6 +190,10 @@ public abstract class AbstractNavigation implements Command {
                 Thread.sleep(delay);
 
             }catch(Exception e){
+                if(isFatalError(e)){
+                    logger.error("Aborting test run - unrecoverable error (browser session lost or credentials expired): "+e.getClass().getSimpleName()+" - "+e.getMessage());
+                    break;
+                }
                 logger.error("Step failed and will continue with the next action. Cause: "+e.getClass().getSimpleName()+" - "+e.getMessage());
             }
             elements.clear();
@@ -183,38 +202,148 @@ public abstract class AbstractNavigation implements Command {
     }
 
     /**
-     * Attempts to click an element robustly. A plain Selenium click fails with
-     * ElementClickInterceptedException when a popover/modal overlay covers the
-     * target (common on Amazon after "Add to cart"). In that case we fall back
-     * to a JavaScript click, which dispatches the event directly to the element.
+     * Attempts to click an element robustly.
      *
-     * @return true if the click (or the JS fallback) succeeded, false otherwise.
+     * <p>A native Selenium {@code click()} that returns without throwing is a
+     * real interaction and is trusted. The JavaScript fallback, however, can
+     * silently do nothing (e.g. when dispatched on a non-interactive label
+     * span), so we only treat it as success when it produces a detectable page
+     * change. This avoids the false "success" that previously made the model
+     * believe an item was added when the cart was actually still empty.
+     *
+     * @return true if the click was performed and had an effect, false otherwise.
      */
     private boolean clickElement(HtmlElement c){
-        WebElement el = c.getElement();
-        try{
-            // Bring the element into view first; off-screen elements are not interactable.
-            ((JavascriptExecutor)browser).executeScript("arguments[0].scrollIntoView({block:'center'});", el);
-            el.click();
-            return true;
-        }catch(Exception e){
-            logger.warn("Native click failed on "+c.getId()+" ("+e.getClass().getSimpleName()+"). Trying JS click fallback.");
+
+        // Native click, with one stale re-location retry and overlay dismissal.
+        for(int attempt=0; attempt<2; attempt++){
             try{
-                ((JavascriptExecutor)browser).executeScript("arguments[0].click();", el);
-                return true;
-            }catch(Exception ex){
-                logger.error("Click failed on "+c.getId()+": "+ex.getClass().getSimpleName()+" - "+ex.getMessage());
-                return false;
+                WebElement el = relocate(c);
+                ((JavascriptExecutor)browser).executeScript("arguments[0].scrollIntoView({block:'center'});", el);
+                el.click();
+                return true; // a native click that doesn't throw is a real interaction
+            }catch(StaleElementReferenceException se){
+                logger.warn("Click target "+c.getId()+" went stale; re-locating and retrying.");
+                // loop and re-locate
+            }catch(ElementClickInterceptedException ie){
+                logger.warn("Click on "+c.getId()+" was intercepted by an overlay; attempting to dismiss it.");
+                dismissOverlay();
+                try{
+                    relocate(c).click();
+                    return true;
+                }catch(Exception ignore){
+                    break; // fall through to JS fallback
+                }
+            }catch(Exception e){
+                logger.warn("Native click failed on "+c.getId()+" ("+e.getClass().getSimpleName()+"). Trying JS click fallback.");
+                break; // fall through to JS fallback
             }
         }
+
+        // Last resort: JS click. Verify it actually changed the page, otherwise
+        // report failure so the model tries something else.
+        String before = pageSignature();
+        try{
+            ((JavascriptExecutor)browser).executeScript("arguments[0].click();", relocate(c));
+        }catch(Exception ex){
+            logger.error("JS click threw on "+c.getId()+": "+ex.getClass().getSimpleName()+" - "+ex.getMessage());
+            return false;
+        }
+        boolean changed = waitForPageChange(before);
+        if(!changed){
+            logger.warn("JS click on "+c.getId()+" produced no detectable page change; treating as failed.");
+        }
+        return changed;
+    }
+
+    /**
+     * Re-locates an element by its id against the live DOM so we act on a fresh
+     * reference instead of a cached one that may have gone stale. Generated ids
+     * are written onto the DOM by {@link #setIds}, so they are resolvable too.
+     * Falls back to the cached reference if the id can no longer be found.
+     */
+    private WebElement relocate(HtmlElement c){
+        try{
+            return browser.findElement(By.id(c.getId()));
+        }catch(Exception e){
+            return c.getElement();
+        }
+    }
+
+    /**
+     * A use-case-agnostic fingerprint of the current page, used only to detect
+     * whether an action had any effect: the current URL plus the length of the
+     * visible body text. A no-op JS click leaves both unchanged.
+     */
+    private String pageSignature(){
+        try{
+            Object sig = ((JavascriptExecutor)browser).executeScript(
+                "return [location.href,(document.body?document.body.innerText.length:0)].join('|');");
+            return sig == null ? "" : sig.toString();
+        }catch(Exception e){
+            return "";
+        }
+    }
+
+    /** Polls up to 5s for the page signature to change from {@code before}. */
+    private boolean waitForPageChange(String before){
+        long end = System.currentTimeMillis() + 5000;
+        while(System.currentTimeMillis() < end){
+            if(!pageSignature().equals(before)){
+                return true;
+            }
+            try{ Thread.sleep(250); }catch(InterruptedException ie){ Thread.currentThread().interrupt(); break; }
+        }
+        return !pageSignature().equals(before);
+    }
+
+    /**
+     * Best-effort dismissal of a modal/popover/overlay that is intercepting
+     * clicks. Sends ESC and clicks any generic, accessibility-standard close
+     * control it can find. Intentionally free of site-specific selectors.
+     */
+    private void dismissOverlay(){
+        try{ new Actions(browser).sendKeys(Keys.ESCAPE).perform(); }catch(Exception ignore){}
+        try{
+            List<WebElement> closers = browser.findElements(By.cssSelector(
+                "[aria-label='Close'], [aria-label='close'], button.close, [data-dismiss]"));
+            for(WebElement x : closers){
+                if(x.isDisplayed()){ x.click(); break; }
+            }
+        }catch(Exception ignore){}
+    }
+
+    /**
+     * Determines whether an error is unrecoverable and the run should abort
+     * instead of consuming the remaining interaction budget: a lost browser
+     * session, or expired/invalid AWS credentials.
+     */
+    private boolean isFatalError(Throwable t){
+        while(t != null){
+            if(t instanceof org.openqa.selenium.NoSuchSessionException){
+                return true;
+            }
+            String msg = t.getMessage();
+            if(msg != null){
+                String m = msg.toLowerCase();
+                if(m.contains("security token") || m.contains("invalid session id")
+                   || m.contains("the security token included in the request is expired")
+                   || m.contains("expiredtoken") || m.contains("accessdenied")
+                   || m.contains("access denied") || m.contains("unrecognizedclient")){
+                    return true;
+                }
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     /**
      * Selects an option in a dropdown robustly. The model supplies the
      * human-readable label it sees (e.g. "Size 3"), but on many sites the
-     * option's value attribute is something else entirely (e.g. an Amazon ASIN
-     * like "B0BQW38TSM"). So we try, in order: exact visible text, value
-     * attribute, then a case-insensitive contains match on the visible text.
+     * option's value attribute is something else entirely (e.g. an internal
+     * product code). So we try, in order: exact visible text, value attribute,
+     * then a case-insensitive contains match on the visible text.
      */
     private void selectOption(Select select, String value){
         String target = value == null ? "" : value.trim();
@@ -280,24 +409,37 @@ public abstract class AbstractNavigation implements Command {
             return ActionResult.failure(action, "No element with id '"+id+"' is available. Pick an id from the interact list.");
         }
 
-        WebElement el = element.get().getElement();
-        try{
-            if("select".equals(el.getTagName().toLowerCase())){
-                Select select = new Select(el);
-                selectOption(select, value);
-                select.getOptions().stream().filter(WebElement::isSelected).findFirst()
-                      .ifPresent(o-> o.sendKeys(Keys.ENTER));
-                try{ screenshot(); }catch(Exception se){ logger.warn("Screenshot after select failed: "+se.getMessage()); }
-            }else{
-                ((JavascriptExecutor)browser).executeScript("arguments[0].focus();", el);
-                el.sendKeys(Keys.chord(Keys.CONTROL, "a"), value);
-                logger.info("Inputted value "+value+" on "+id);
+        HtmlElement target = element.get();
+        // Re-locate the element each attempt and retry once on staleness, since
+        // the DOM can reflow between element collection and action execution.
+        for(int attempt=0; attempt<2; attempt++){
+            try{
+                WebElement el = relocate(target);
+                if("select".equals(el.getTagName().toLowerCase())){
+                    Select select = new Select(el);
+                    selectOption(select, value);
+                    // Fire input/change events so the page's onchange handler runs.
+                    // Amazon's sort <select> is visually hidden and reacts to the
+                    // change event - not to ENTER, which throws on a hidden option.
+                    ((JavascriptExecutor)browser).executeScript(
+                        "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));" +
+                        "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", el);
+                    try{ screenshot(); }catch(Exception se){ logger.warn("Screenshot after select failed: "+se.getMessage()); }
+                }else{
+                    ((JavascriptExecutor)browser).executeScript("arguments[0].focus();", el);
+                    el.sendKeys(Keys.chord(Keys.CONTROL, "a"), value);
+                    logger.info("Inputted value "+value+" on "+id);
+                }
+                return ActionResult.success(action);
+            }catch(StaleElementReferenceException se){
+                logger.warn("Input on "+id+" hit a stale element; re-locating and retrying.");
+                // loop and re-locate
+            }catch(Exception e){
+                logger.error("Input failed on "+id+": "+e.getClass().getSimpleName()+" - "+e.getMessage());
+                return ActionResult.failure(action, e.getClass().getSimpleName()+": "+e.getMessage());
             }
-            return ActionResult.success(action);
-        }catch(Exception e){
-            logger.error("Input failed on "+id+": "+e.getClass().getSimpleName()+" - "+e.getMessage());
-            return ActionResult.failure(action, e.getClass().getSimpleName()+": "+e.getMessage());
         }
+        return ActionResult.failure(action, "StaleElementReferenceException: element '"+id+"' kept going stale; the page may still be loading.");
     }
 
     private ActionResult performClick(List<HtmlElement> elements, JSONObject action){
@@ -640,6 +782,7 @@ public abstract class AbstractNavigation implements Command {
             <actions>%s</actions>
             <available-interactions>%s</available-interactions>
             <interact>%s</interact>.
+            When an entry in the past actions list includes a "result" field marked FAILED, that action did not work - do not repeat it. Choose a different element or a different approach to accomplish the test case.
             
             Answer in JSON format:     
                 """;   
@@ -656,8 +799,14 @@ public abstract class AbstractNavigation implements Command {
     public void tearDown() throws Exception {
         //release resources
         if( browser!=null){
-            browser.close();
-            browser.quit();
+            try{
+                browser.close();
+                browser.quit();
+            }catch(Exception e){
+                // The session may already be gone (e.g. the browser crashed or
+                // the run aborted on a lost session); nothing left to clean up.
+                logger.warn("Browser teardown skipped: "+e.getClass().getSimpleName()+" - "+e.getMessage());
+            }
         }
     }
     
